@@ -1,29 +1,29 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-
 # TODO: make it pip installable
-
 
 import os
 import sys
 import numpy as np
 import click
+import tqdm
 import skimage.io
+import traceback
 
 # Root directory of the project
-ROOT_DIR = os.path.abspath("../")
-sys.path.append(ROOT_DIR)  # To find local version of the library
+# sys.path.append(ROOT_DIR)  # To find local version of the library
+import mrcnn
 from mrcnn import utils
 import mrcnn.model as modellib
-MODEL_DIR = os.path.join(ROOT_DIR, "logs")
+import mrcnn.coco as coco
+ROOT_DIR = path = os.path.dirname(mrcnn.__file__)
+MODEL_DIR = os.path.join('.', "logs")  # TODO: handle these paths better
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
-# Download COCO trained weights from Releases if needed
 
 if not os.path.exists(COCO_MODEL_PATH):
     utils.download_trained_weights(COCO_MODEL_PATH)
-sys.path.append(os.path.join(ROOT_DIR, "samples/coco/"))  # To find local version
-import coco
+# sys.path.append(os.path.join(ROOT_DIR, "samples/coco/"))  # To find local version
 
 
 def crop_image(image, box):
@@ -79,56 +79,79 @@ def postprocess_mask(mask):
     return mask.squeeze() * 1.0
 
 
-def infer_file(f_path, model, class_names):
-    image_dir = os.path.dirname(f_path)
+
+def infer_file(f_path, model, class_names, target_class):
     ''' run mask rcnn from image provided path to image'''
-    image = skimage.io.imread(f_path)
+    try:
+        image_dir = os.path.dirname(f_path)
+        image = skimage.io.imread(f_path)
 
-    in_name, in_ext = os.path.splitext(os.path.basename(f_path))
+        in_name, in_ext = os.path.splitext(os.path.basename(f_path))
 
-    results = model.detect([image], verbose=1)
+        results = model.detect([image], verbose=0)
 
-    r = results[0]
+        r = results[0]
 
-    target_class = "cat"
-    c_idx = class_names.index(target_class)
-    _filter = [True if _idx == c_idx else False for _idx in r["class_ids"]]
+        c_idx = class_names.index(target_class)
+        _filter = [True if _idx == c_idx else False for _idx in r["class_ids"]]
 
-    if True in _filter:
-        rr = {
-            "rois" : filter_roi(r["rois"], _filter),
-            "scores" : filter_scores(r["scores"], _filter),
-            "masks" : filter_masks(r["masks"], _filter),
-            "class_ids" : filter_class_ids(r["class_ids"], _filter)
-        }
-        box = list(rr["rois"].squeeze())
-        im_crop = crop_image(image, box)
-        mask_crop = crop_image(rr["masks"], box)
+        if True in _filter:
+            rr = {
+                "rois" : filter_roi(r["rois"], _filter),
+                "scores" : filter_scores(r["scores"], _filter),
+                "masks" : filter_masks(r["masks"], _filter),
+                "class_ids" : filter_class_ids(r["class_ids"], _filter)
+            }
+            box = list(rr["rois"].squeeze())
+            im_crop = crop_image(image, box)
+            mask_crop = crop_image(rr["masks"], box)
 
-        out_dir = os.path.join(image_dir, os.pardir, "cropped")
-        os.makedirs(out_dir, exist_ok=True)
-        out_name = ''.join(["cropped_", in_name, in_ext])
-        out_name = os.path.join(out_dir, out_name)
-        skimage.io.imsave(out_name, im_crop)
+            out_dir = os.path.join(image_dir, os.pardir, "cropped")
+            os.makedirs(out_dir, exist_ok=True)
+            out_name = ''.join(["cropped_", in_name, in_ext])
+            out_name = os.path.join(out_dir, out_name)
+            skimage.io.imsave(out_name, im_crop)
 
-        out_dir = os.path.join(image_dir, os.pardir, "mask")
-        os.makedirs(out_dir, exist_ok=True)
-        out_name = ''.join(["mask_", in_name, in_ext])
-        out_name = os.path.join(out_dir, out_name)
-        skimage.io.imsave(out_name, postprocess_mask(mask_crop))
-    else:
-        print("no cat found")
+            out_dir = os.path.join(image_dir, os.pardir, "mask")
+            os.makedirs(out_dir, exist_ok=True)
+            out_name = ''.join(["mask_", in_name, in_ext])
+            out_name = os.path.join(out_dir, out_name)
+            skimage.io.imsave(out_name, postprocess_mask(mask_crop))
+        else:
+            print("target ")
+    except Exception as err:
+        print("error at ", f_path)
+        try:
+            raise TypeError("Again !?!")
+        except:
+            pass
+
+        traceback.print_tb(err.__traceback__)
 
 
-def infer_folder(folder_path, model, class_names):
-    files = os.listdir(folder_path)
-    for file in files:
-        infer_file(os.path.join(folder_path, file), model, class_names)
+def infer_folder(folder_path, model, class_names, target_class):
+    files = sorted(os.listdir(folder_path))
+    print(folder_path)
+    for file in tqdm.tqdm(files):
+        print(file)
+        infer_file(os.path.join(folder_path, file), model, class_names, target_class)
+
 
 @click.command()
 @click.argument("file_or_folder")
 @click.argument("target_class")
 def main(file_or_folder, target_class):
+    '''
+    crop out a target class in an image assuming there is only 1 instance of this class in the image.
+
+    Usage 1 : box_crop cat.jpg cat
+        --> outputs centered square crop into ./cropped/cropped_cat.jpg
+        --> outputs centered mask crop into ./mask/mask_cat.jpg
+
+    Usage 2 : box_crop frames/ cat
+        --> outputs each file in frames a centered square crop into ./cropped/xx.jpg
+        --> outputs each file in frames a centered mask crop into ./mask/xx.jpg
+    '''
     class InferenceConfig(coco.CocoConfig):
         # Set batch size to 1 since we'll be running inference on
         # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
@@ -164,9 +187,10 @@ def main(file_or_folder, target_class):
         print(class_names)
 
     if os.path.isdir(file_or_folder):
-        infer_folder(file_or_folder, model, class_names)
+        infer_folder(file_or_folder, model, class_names, target_class)
     else:
-        infer_file(file_or_folder, model, class_names)
+        print(file_or_folder)
+        infer_file(file_or_folder, model, class_names, target_class)
 
 
 

@@ -10,3 +10,6 @@ opencv-python
 h5py
 imgaug
 IPython[all]
+tqdm
+click
+pycocotools
