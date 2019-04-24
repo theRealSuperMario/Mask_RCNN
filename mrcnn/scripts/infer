@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# TODO: make it pip installable
-
 import os
 import sys
 import numpy as np
@@ -17,14 +15,30 @@ import mrcnn
 from mrcnn import utils
 import mrcnn.model as modellib
 import mrcnn.coco as coco
+from mrcnn import visualize
 ROOT_DIR = path = os.path.dirname(mrcnn.__file__)
-FAIL_FILES = []
-FINISHED_FILES = []
 MODEL_DIR = os.path.join('.', "logs")  # TODO: handle these paths better
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 
 if not os.path.exists(COCO_MODEL_PATH):
     utils.download_trained_weights(COCO_MODEL_PATH)
+
+
+CLASS_NAMES = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
+               'bus', 'train', 'truck', 'boat', 'traffic light',
+               'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird',
+               'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear',
+               'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie',
+               'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
+               'kite', 'baseball bat', 'baseball glove', 'skateboard',
+               'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup',
+               'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
+               'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza',
+               'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed',
+               'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote',
+               'keyboard', 'cell phone', 'microwave', 'oven', 'toaster',
+               'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
+               'teddy bear', 'hair drier', 'toothbrush']
 
 
 def crop_image(image, box):
@@ -75,14 +89,11 @@ def filter_masks(masks, _filter):
     assert masks.shape[-1] == len(_filter)
     return np.concatenate([masks[..., i] for i in range(len(_filter)) if _filter[i]])[..., np.newaxis]
 
-def postprocess_mask(mask):
-    ''' boolean array to float image '''
-    return mask.squeeze() * 1.0
 
 
-
-def infer_file(f_path, model, class_names, target_class):
+def infer_file(f_path, model):
     ''' run mask rcnn from image provided path to image'''
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
     try:
         image_dir = os.path.dirname(f_path)
         image = skimage.io.imread(f_path)
@@ -93,36 +104,17 @@ def infer_file(f_path, model, class_names, target_class):
 
         r = results[0]
 
-        c_idx = class_names.index(target_class)
-        _filter = [True if _idx == c_idx else False for _idx in r["class_ids"]]
+        visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'],
+                                    CLASS_NAMES, r['scores'], ax=ax)
 
-        if True in _filter:
-            rr = {
-                "rois" : filter_roi(r["rois"], _filter),
-                "scores" : filter_scores(r["scores"], _filter),
-                "masks" : filter_masks(r["masks"], _filter),
-                "class_ids" : filter_class_ids(r["class_ids"], _filter)
-            }
-            box = list(rr["rois"].squeeze())
-            im_crop = crop_image(image, box)
-            mask_crop = crop_image(rr["masks"], box)
+        out_dir = os.path.join(image_dir, os.pardir, "instances_")
+        os.makedirs(out_dir, exist_ok=True)
+        out_name = ''.join(["instances_", in_name, in_ext])
+        out_name = os.path.join(out_dir, out_name)
+        plt.savefig(out_name)
 
-            out_dir = os.path.join(image_dir, os.pardir, "cropped")
-            os.makedirs(out_dir, exist_ok=True)
-            out_name = ''.join(["cropped_", in_name, in_ext])
-            out_name = os.path.join(out_dir, out_name)
-            skimage.io.imsave(out_name, im_crop)
 
-            out_dir = os.path.join(image_dir, os.pardir, "mask")
-            os.makedirs(out_dir, exist_ok=True)
-            out_name = ''.join(["mask_", in_name, in_ext])
-            out_name = os.path.join(out_dir, out_name)
-            skimage.io.imsave(out_name, postprocess_mask(mask_crop))
-            FINISHED_FILES.append(f_path)
-        else:
-            print("target {} not found in image".format(target_class))
     except Exception as err:
-        FAIL_FILES.append(f_path)
         print("error at ", f_path)
         try:
             raise TypeError("Again !?!")
@@ -140,26 +132,14 @@ def infer_folder(folder_path, model, class_names, target_class):
         infer_file(os.path.join(folder_path, file), model, class_names, target_class)
 
 
-def print_in_a_frame(words, borderchar = '*'):
-    size = max(len(word) for word in words)
-    print(borderchar * (size + 4))
-    for word in words:
-        print('{bc} {:<{}} {bc}'.format(word, size, bc = borderchar))
-    print(borderchar * (size + 4))
+from matplotlib import pyplot as plt
 
 
-def print_report():
-    print_in_a_frame(["summary - Successful files"])
-    msg = "\n".join(FINISHED_FILES)
-    print(msg)
-    print_in_a_frame(["summary - failed files"])
-    msg = "\n".join(FAIL_FILES)
-    print(msg)
+# TODO: add filter option to filter instances
 
 @click.command()
 @click.argument("file_or_folder")
-@click.argument("target_class")
-def main(file_or_folder, target_class):
+def main(file_or_folder):
     '''
     crop out a target class in an image assuming there is only 1 instance of this class in the image.
 
@@ -184,35 +164,14 @@ def main(file_or_folder, target_class):
     # Load weights trained on MS-COCO
     model.load_weights(COCO_MODEL_PATH, by_name=True)
 
-    class_names = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
-                   'bus', 'train', 'truck', 'boat', 'traffic light',
-                   'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird',
-                   'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear',
-                   'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie',
-                   'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
-                   'kite', 'baseball bat', 'baseball glove', 'skateboard',
-                   'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup',
-                   'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
-                   'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza',
-                   'donut', 'cake', 'chair', 'couch', 'potted plant', 'bed',
-                   'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote',
-                   'keyboard', 'cell phone', 'microwave', 'oven', 'toaster',
-                   'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
-                   'teddy bear', 'hair drier', 'toothbrush']
-
-
-    if target_class not in class_names:
-        print("target class {} not in class names".format(target_class))
-        print(class_names)
 
     if os.path.isdir(file_or_folder):
-        infer_folder(file_or_folder, model, class_names, target_class)
+        infer_folder(file_or_folder, model)
     else:
         print(file_or_folder)
-        infer_file(file_or_folder, model, class_names, target_class)
+        infer_file(file_or_folder, model)
 
 
-    print_report()
 
 
 if __name__ == '__main__':

@@ -67,5 +67,5 @@ setup(
         'Programming Language :: Python :: 3.6',
     ],
     keywords="image instance segmentation object detection mask rcnn r-cnn tensorflow keras",
-    scripts=["mrcnn/scripts/box_crop"]
+    scripts=["mrcnn/scripts/box_crop", "mrcnn/scripts/infer"]
 )
