@@ -89,8 +89,6 @@ def filter_masks(masks, _filter):
     assert masks.shape[-1] == len(_filter)
     return np.concatenate([masks[..., i] for i in range(len(_filter)) if _filter[i]])[..., np.newaxis]
 
-
-
 def infer_file(f_path, model):
     ''' run mask rcnn from image provided path to image'''
     fig, ax = plt.subplots(1, 1, figsize=(8, 8))
@@ -107,10 +105,11 @@ def infer_file(f_path, model):
         visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'],
                                     CLASS_NAMES, r['scores'], ax=ax)
 
-        out_dir = os.path.join(image_dir, os.pardir, "instances_")
+        out_dir = os.path.join(image_dir, os.pardir, "instances")
         os.makedirs(out_dir, exist_ok=True)
         out_name = ''.join(["instances_", in_name, in_ext])
         out_name = os.path.join(out_dir, out_name)
+        plt.tight_layout()
         plt.savefig(out_name)
 
 
@@ -122,7 +121,6 @@ def infer_file(f_path, model):
             pass
 
         traceback.print_tb(err.__traceback__)
-
 
 def infer_folder(folder_path, model, class_names, target_class):
     files = sorted(os.listdir(folder_path))
