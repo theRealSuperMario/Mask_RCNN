@@ -97,10 +97,27 @@ def postprocess_mask(mask):
     return mask
 
 
-def infer_file(f_path, model, class_names, target_class, headroom):
-    """ run mask rcnn from image provided path to image"""
+def infer_file(
+    f_path,
+    model,
+    class_names,
+    target_class,
+    headroom,
+    output_folder_cropped=None,
+    output_folder_masks=None,
+):
+    """ run mask rcnn from image provided path to image
+
+    Parameters
+    ----------
+    output_folder_masks
+    """
     try:
         image_dir = os.path.dirname(f_path)
+        if output_folder_cropped is None:
+            output_folder_cropped = os.path.join(image_dir, os.pardir, "cropped")
+        if output_folder_masks is None:
+            output_folder_masks = os.path.join(image_dir, os.pardir, "mask")
         image = skimage.io.imread(f_path)
 
         in_name, in_ext = os.path.splitext(os.path.basename(f_path))
@@ -132,18 +149,20 @@ def infer_file(f_path, model, class_names, target_class, headroom):
             im_crop = crop_image(image, box, headroom)
             mask_crop = crop_image(rr["masks"], box, headroom)
 
-            out_dir = os.path.join(image_dir, os.pardir, "cropped")
+            out_dir = os.path.join(output_folder_cropped)
             os.makedirs(out_dir, exist_ok=True)
-            out_name = "".join(["cropped_", in_name, in_ext])
-            out_name = os.path.join(out_dir, out_name)
-            skimage.io.imsave(out_name, im_crop)
+            out_name_cropped = "".join(["cropped_", in_name, in_ext])
+            out_name_cropped = os.path.join(out_dir, out_name_cropped)
+            skimage.io.imsave(out_name_cropped, im_crop)
 
-            out_dir = os.path.join(image_dir, os.pardir, "mask")
+            out_dir = os.path.join(output_folder_masks)
             os.makedirs(out_dir, exist_ok=True)
-            out_name = "".join(["mask_", in_name, ".png"])
-            out_name = os.path.join(out_dir, out_name)
-            cv2.imwrite(out_name, postprocess_mask(mask_crop))
-            FINISHED_FILES.append(f_path)
+            out_name_mask = "".join(["mask_", in_name, ".png"])
+            out_name_mask = os.path.join(out_dir, out_name_mask)
+            cv2.imwrite(out_name_mask, postprocess_mask(mask_crop))
+            FINISHED_FILES.append(
+                "{} --> {}, {}".format(f_path, out_name_cropped, out_name_mask)
+            )
         else:
             print("target {} not found in image".format(target_class))
     except Exception as err:
@@ -157,13 +176,27 @@ def infer_file(f_path, model, class_names, target_class, headroom):
         traceback.print_tb(err.__traceback__)
 
 
-def infer_folder(folder_path, model, class_names, target_class, headroom):
+def infer_folder(
+    folder_path,
+    model,
+    class_names,
+    target_class,
+    headroom,
+    output_folder_cropped=None,
+    output_folder_masks=None,
+):
     files = sorted(os.listdir(folder_path))
     print(folder_path)
     for file in tqdm.tqdm(files):
         print(file)
         infer_file(
-            os.path.join(folder_path, file), model, class_names, target_class, headroom
+            os.path.join(folder_path, file),
+            model,
+            class_names,
+            target_class,
+            headroom,
+            output_folder_cropped,
+            output_folder_masks,
         )
 
 
@@ -190,17 +223,25 @@ def print_report():
 @click.option(
     "--headroom", help="ratio of bounding box to expand for cropping", default=0.0
 )
-def main(file_or_folder, target_class, headroom):
+@click.option("--output-folder-cropped", "-oc", default=None)
+@click.option("--output-folder-masks", "-om", default=None)
+def main(
+    file_or_folder, target_class, headroom, output_folder_cropped, output_folder_masks
+):
     """
     crop out a target class in an image assuming there is only 1 instance of this class in the image.
 
     Usage 1 : box_crop cat.jpg cat
         --> outputs centered square crop into ./cropped/cropped_cat.jpg
-        --> outputs centered mask crop into ./mask/mask_cat.jpg
+        --> outputs centered mask crop into ./mask/mask_cat.png
 
     Usage 2 : box_crop frames/ cat
-        --> outputs each file in frames a centered square crop into ./cropped/xx.jpg
-        --> outputs each file in frames a centered mask crop into ./mask/xx.jpg
+        --> outputs each file in frames a centered square crop into ./cropped/cropped_xx.jpg
+        --> outputs each file in frames a centered mask crop into ./mask/mask_xx.png
+
+    Usage 3 : box_crop frames/ cat -oc out_folder -om out_folder
+        --> outputs each file in frames a centered square crop into ./out_folder/cropped_xx.jpg
+        --> outputs each file in frames a centered mask crop into ./out_folder/mask_xx.png
 
     available class names :
     class_names = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
@@ -322,10 +363,26 @@ def main(file_or_folder, target_class, headroom):
         print(class_names)
 
     if os.path.isdir(file_or_folder):
-        infer_folder(file_or_folder, model, class_names, target_class, headroom)
+        infer_folder(
+            file_or_folder,
+            model,
+            class_names,
+            target_class,
+            headroom,
+            output_folder_cropped,
+            output_folder_masks,
+        )
     else:
         print(file_or_folder)
-        infer_file(file_or_folder, model, class_names, target_class, headroom)
+        infer_file(
+            file_or_folder,
+            model,
+            class_names,
+            target_class,
+            headroom,
+            output_folder_cropped,
+            output_folder_masks,
+        )
 
     print_report()
 
