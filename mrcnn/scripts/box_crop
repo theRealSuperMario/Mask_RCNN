@@ -10,6 +10,7 @@ import click
 import tqdm
 import skimage.io
 import traceback
+import cv2
 
 # Root directory of the project
 # sys.path.append(ROOT_DIR)  # To find local version of the library
@@ -53,6 +54,8 @@ def crop_image(image, box, headroom=0.0):
     padx = (delta_box + headroom_pixels, delta_box + headroom_pixels)
     pady = (delta_box + headroom_pixels, delta_box + headroom_pixels)
 
+    if len(image.shape) < 3:
+        image = np.expand_dims(image, -1)
     _image = np.pad(image, (pady, padx, (0, 0)), mode="symmetric")
 
     crop_x1 = int(x_center - square_h / 2 + padx[0])
@@ -84,14 +87,14 @@ def filter_class_ids(class_ids, _filter):
 def filter_masks(masks, _filter):
     """ filter masks according to filter list """
     assert masks.shape[-1] == len(_filter)
-    return np.concatenate([masks[..., i] for i in range(len(_filter)) if _filter[i]])[
-        ..., np.newaxis
-    ]
+    new_mask = np.stack([masks[..., i] for i in range(len(_filter)) if _filter[i]], -1)
+    return new_mask
 
 
 def postprocess_mask(mask):
-    """ boolean array to float image """
-    return mask.squeeze() * 1.0
+    mask = np.squeeze(mask * 255.0)
+    mask = mask.astype(np.uint8)
+    return mask
 
 
 def infer_file(f_path, model, class_names, target_class, headroom):
@@ -109,13 +112,22 @@ def infer_file(f_path, model, class_names, target_class, headroom):
         c_idx = class_names.index(target_class)
         _filter = [True if _idx == c_idx else False for _idx in r["class_ids"]]
 
-        if True in _filter:
+        if any(_filter):
             rr = {
                 "rois": filter_roi(r["rois"], _filter),
                 "scores": filter_scores(r["scores"], _filter),
                 "masks": filter_masks(r["masks"], _filter),
                 "class_ids": filter_class_ids(r["class_ids"], _filter),
             }
+            if len(rr["scores"]) > 1:
+                best_score_idx = np.argmax(rr["scores"])
+                _filter = [i == best_score_idx for i in range(len(rr["scores"]))]
+                rr = {
+                    "rois": filter_roi(rr["rois"], _filter),
+                    "scores": filter_scores(rr["scores"], _filter),
+                    "masks": filter_masks(rr["masks"], _filter),
+                    "class_ids": filter_class_ids(rr["class_ids"], _filter),
+                }
             box = list(rr["rois"].squeeze())
             im_crop = crop_image(image, box, headroom)
             mask_crop = crop_image(rr["masks"], box, headroom)
@@ -128,9 +140,9 @@ def infer_file(f_path, model, class_names, target_class, headroom):
 
             out_dir = os.path.join(image_dir, os.pardir, "mask")
             os.makedirs(out_dir, exist_ok=True)
-            out_name = "".join(["mask_", in_name, in_ext])
+            out_name = "".join(["mask_", in_name, ".png"])
             out_name = os.path.join(out_dir, out_name)
-            skimage.io.imsave(out_name, postprocess_mask(mask_crop))
+            cv2.imwrite(out_name, postprocess_mask(mask_crop))
             FINISHED_FILES.append(f_path)
         else:
             print("target {} not found in image".format(target_class))
